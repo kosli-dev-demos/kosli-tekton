@@ -1,0 +1,95 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: kosli-cli-ploigos-log-deployment-approved
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.33.2"
+    tekton.dev/categories: Continuous Integration
+    tekton.dev/tags: kosli, security, compliance, ci, cd
+    tekton.dev/displayName: "Kosli - Deployment Approved"
+spec:
+  description: >-
+    This task logs the approval for an artifact with Kosli.
+  workspaces:
+  - name: home
+    mountPath: /home/ploigos
+    description: |
+      Workspace for the container users home directory.
+  - name: app
+    description: |
+      Workspace with the checked out application in to use as the
+      working directory for the step execution.
+  - name: ploigos-platform-config
+    description: |
+      ConfigMap containing platform-level config
+    mountPath: /opt/platform-config
+  - name: ploigos-platform-config-secrets
+    description: |
+      Secret containing platform-level secrets
+    mountPath: /opt/platform-config-secrets
+  params:
+    - name: image
+      type: string
+      description: |
+        Container image to run the steps of this task in.
+      default: ''
+    - name: imagePullPolicy
+      type: string
+      description: |
+        Policy for pulling new versions of the given image.
+      default: IfNotPresent
+    - name: kosliAPIToken
+      type: string
+      description: |
+        The Kosli API token
+      default: ''
+    - name: kosliOwner
+      type: string
+      description: |
+        The Kosli owner of the pipeline
+      default: ''
+    - name: kosliPipeline
+      type: string
+      description: |
+        The Kosli pipeline recorded against.
+      default: ''
+    - name: cliDesc
+      type: string
+      description: |
+        A description for this deployment
+      default: ''
+    - name: cliArtifactPath
+      type: string
+      description: |
+        The path to the artifact for the expected deployment
+      default: ''
+    - name: cliArtifactType
+      type: string
+      description: |
+        The type of artifact to deploy.  Options are [image, file, dir]
+      default: ''
+  steps:
+    - name: kosli-cli-ploigos-log-deployment-approved
+      image: $(params.image)
+      imagePullPolicy: $(params.imagePullPolicy)
+      workingDir: $(workspaces.app.path)
+      script: |
+        #!/bin/bash
+
+        API_TOKEN="$(params.kosliAPIToken)"
+        OWNER="$(params.kosliOwner)"
+        PIPELINE="$(params.kosliPipeline)"
+        DESCRIPTION="$(params.cliDesc)"
+        ARTIFACT_PATH="$(params.cliArtifactPath)"
+        ARTIFACT_TYPE="$(params.cliArtifactType)"
+
+        kosli pipeline approval report $ARTIFACT_PATH \
+          --artifact-type $ARTIFACT_TYPE \
+          --api-token $API_TOKEN \
+          --owner $OWNER \
+          --pipeline $PIPELINE \
+          --newest-commit $(git rev-parse HEAD) \
+          --oldest-commit $(git rev-parse HEAD~1) \
+          --debug

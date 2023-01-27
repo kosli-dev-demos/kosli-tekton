@@ -1,0 +1,114 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: kosli-cli-ploigos-log-audit-package
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.33.2"
+    tekton.dev/categories: Continuous Integration
+    tekton.dev/tags: kosli, security, compliance, ci, cd
+    tekton.dev/displayName: "Kosli - GitSHA Fingerprint"
+spec:
+  description: >-
+    This task repots the differing type of evidence for a jar
+  workspaces:
+  - name: home
+    mountPath: /home/ploigos
+    description: |
+      Workspace for the container users home directory.
+  - name: app
+    description: |
+      Workspace with the checked out application in to use as the
+      working directory for the step execution.
+  - name: ploigos-platform-config
+    description: |
+      ConfigMap containing platform-level config
+    mountPath: /opt/platform-config
+  - name: ploigos-platform-config-secrets
+    description: |
+      Secret containing platform-level secrets
+    mountPath: /opt/platform-config-secrets
+  params:
+    - name: image
+      type: string
+      description: |
+        Container image to run the steps of this task in.
+      default: ''
+    - name: imagePullPolicy
+      type: string
+      description: |
+        Policy for pulling new versions of the given image.
+      default: IfNotPresent
+    - name: kosliAPIToken
+      type: string
+      description: |
+        The Kosli API token
+      default: ''
+    - name: kosliPipeline
+      type: string
+      description: |
+        The Kosli pipeline recorded against.
+      default: ''
+    - name: kosliOwner
+      type: string
+      description: |
+        The Kosli owner of the pipeline
+      default: ''
+    - name: cliDesc
+      type: string
+      description: |
+        The evidence description.
+      default: ''
+    - name: cliEvidenceType
+      type: string
+      description: |
+        The type of evidence being reported.
+      default: 'audit-package'
+    - name: cliBuildURL
+      type: string
+      description: |
+        The url which links to the build.
+      default: 'https://www.the-build-link.com'
+  steps:
+    - name: kosli-cli-ploigos-log-audit-package
+      image: $(params.image)
+      imagePullPolicy: $(params.imagePullPolicy)
+      workingDir: $(workspaces.app.path)
+      script: |
+        #!/bin/bash
+
+        API_TOKEN="$(params.kosliAPIToken)"
+        PIPELINE="$(params.kosliPipeline)"
+        BUILD_URL="$(params.cliBuildURL)"
+        OWNER="$(params.kosliOwner)"
+        DESCRIPTION="$(params.cliDesc)"
+        EVIDENCE_TYPE="$(params.cliEvidenceType)"
+
+        DATA=false
+        while [ "$DATA" != "true" ]; do 
+            if $( yq '.step-runner-results[] | select(.report | has("ResultArtifactsArchive"))' ./step-runner-working/step-runner-results.yml )
+                then
+                    echo "Waiting For Data To Appear"
+                    sleep 2
+                else 
+                    DATA=true
+            fi
+        done
+
+        REPORT_ROUTE=$(yq '.step-runner-results.PROD.report.ResultArtifactsArchive.artifacts[] | select(.name == "results-archive-uri").value' ./step-runner-working/step-runner-results.yml)
+        NEXUS_ROUTE="https://$(oc get route nexus -n devsecops -o yaml | yq '.status.ingress[].host')"
+        PACKAGE_ROUTE="$NEXUS_ROUTE/repository/result-artifacts-archive/platform/ref-quarkus-mvn/fruit/${REPORT_ROUTE##*/}"
+
+        USER_DATA="{\"audit-archive\":\"${PACKAGE_ROUTE}\"}"
+        echo $USER_DATA > audit-archive.json
+
+        kosli pipeline artifact report evidence generic ./src \
+          --artifact-type dir \
+          --api-token $API_TOKEN \
+          --owner $OWNER \
+          --pipeline $PIPELINE \
+          --build-url $BUILD_URL \
+          --evidence-type $EVIDENCE_TYPE \
+          --user-data ./audit-archive.json \
+          --debug

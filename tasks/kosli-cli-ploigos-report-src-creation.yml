@@ -1,0 +1,104 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: kosli-cli-ploigos-report-src-creation
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.33.2"
+    tekton.dev/categories: Continuous Integration
+    tekton.dev/tags: kosli, security, compliance, ci, cd
+    tekton.dev/displayName: "Kosli - Report the creation of a JAR Artifact"
+spec:
+  description: >-
+    This task uses the Kosli CLI to report the creation of a JAR Artifact.
+  workspaces:
+  - name: home
+    mountPath: /home/ploigos
+    description: |
+      Workspace for the container users home directory.
+  - name: app
+    description: |
+      Workspace with the checked out application in to use as the
+      working directory for the step execution.
+  - name: ploigos-platform-config
+    description: |
+      ConfigMap containing platform-level config
+    mountPath: /opt/platform-config
+  - name: ploigos-platform-config-secrets
+    description: |
+      Secret containing platform-level secrets
+    mountPath: /opt/platform-config-secrets
+  params:
+    - name: image
+      type: string
+      description: |
+        Container image to run the steps of this task in.
+      default: ''
+    - name: imagePullPolicy
+      type: string
+      description: |
+        Policy for pulling new versions of the given image.
+      default: IfNotPresent
+    - name: kosliAPIToken
+      type: string
+      description: |
+        The Kosli API token
+      default: ''
+    - name: kosliPipeline
+      type: string
+      description: |
+        The Kosli pipeline recorded against.
+      default: ''
+    - name: kosliOwner
+      type: string
+      description: |
+        The Kosli owner of the pipeline
+      default: ''
+    - name: cliBuildURL
+      type: string
+      description: |
+        The url which links to the build.
+      default: 'https://www.the-build-link.com/todo-fix-this'
+    - name: cliCommitURL
+      type: string
+      description: |
+        The url which links to the commit.
+      default: 'https://www.the-commit-link.com/todo-fix-this'
+  steps:
+    - name: kosli-cli-ploigos-report-src-creation
+      image: $(params.image)
+      imagePullPolicy: $(params.imagePullPolicy)
+      workingDir: $(workspaces.app.path)
+      script: |
+        #!/bin/bash
+
+        API_TOKEN="$(params.kosliAPIToken)"
+        OWNER="$(params.kosliOwner)"
+        PIPELINE="$(params.kosliPipeline)"
+        BUILD_URL="$(params.cliBuildURL)"
+        COMMIT_URL="$(params.cliCommitURL)"
+        
+        JAR_PATH=$(yq '.step-runner-results.package.MavenPackage.artifacts[] | select(.name == "packages").value[0].path' ./step-runner-working/step-runner-results.yml)
+        JAR_FILE="${JAR_PATH##*/}"
+        GITSHA=$(yq '.step-runner-results.generate-metadata.Git.artifacts[] | select(.name == "sha").value' ./step-runner-working/step-runner-results.yml)
+        
+        kosli pipeline artifact report creation ./src \
+          --artifact-type dir \
+          --api-token $API_TOKEN \
+          --owner $OWNER \
+          --pipeline $PIPELINE \
+          --build-url $BUILD_URL \
+          --commit-url $COMMIT_URL \
+          --git-commit $GITSHA  \
+          --debug
+
+        # kosli pipeline artifact report creation $JAR_PATH \
+        #   --artifact-type file \
+        #   --api-token $API_TOKEN \
+        #   --owner $OWNER \
+        #   --pipeline $PIPELINE \
+        #   --build-url $BUILD_URL \
+        #   --commit-url $COMMIT_URL \
+        #   --description $JAR_FILE \
+        #   --git-commit $GITSHA
